@@ -603,37 +603,29 @@ void OGR2SQLITE_ogr_datasource_load_layers(sqlite3_context* pContext,
         return;
     }
 
-    CPLString osEscapedDataSource = OGRSQLiteEscape(pszDataSource);
+    CPLString osEscapedDataSource = SQLEscapeLiteral(pszDataSource);
     for(int i=0;i<poDS->GetLayerCount();i++)
     {
         const char* pszLayerName = poDS->GetLayer(i)->GetName();
-        CPLString osEscapedLayerName = OGRSQLiteEscape(pszLayerName);
+        CPLString osEscapedLayerName = SQLEscapeLiteral(pszLayerName);
         CPLString osTableName;
         if( pszPrefix != NULL )
         {
             osTableName = pszPrefix;
             osTableName += "_";
-            osTableName += OGRSQLiteEscapeName(pszLayerName);
+            osTableName += SQLEscapeName(pszLayerName);
         }
         else
         {
-            osTableName = OGRSQLiteEscapeName(pszLayerName);
+            osTableName = SQLEscapeName(pszLayerName);
         }
 
-        char* pszErrMsg = NULL;
-        if( sqlite3_exec(hDB, CPLSPrintf(
+        SQLCommand(hDB, CPLSPrintf(
             "CREATE VIRTUAL TABLE \"%s\" USING VirtualOGR('%s', %d, '%s')",
                 osTableName.c_str(),
                 osEscapedDataSource.c_str(),
                 bUpdate,
-                osEscapedLayerName.c_str()),
-            NULL, NULL, &pszErrMsg) != SQLITE_OK )
-        {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "Cannot create table \"%s\" : %s",
-                     osTableName.c_str(), pszErrMsg);
-            sqlite3_free(pszErrMsg);
-        }
+                osEscapedLayerName.c_str()));
     }
 
     poDS->Release();

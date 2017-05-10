@@ -28,12 +28,6 @@ following non-linear geometry types :CIRCULARSTRING, COMPOUNDCURVE, CURVEPOLYGON
 
 <ul>
 <li>GeoPackage only supports one geometry column per table.</li>
-<li>Before GDAL 2.0, the driver did not implement the GeoPackage spatial index extension.</li>
-<li>The core GeoPackage specification does not currently support non-spatial tables, but
-    starting with GDAL 2.0, the driver allows creating and reading such tables via the
-    <a href="geopackage_aspatial.html">Aspatial Support</a> (<code>gdal_aspatial</code>) extension.
-    Note: starting with GDAL 2.2, the driver will also, by default, list non spatial tables
-    that are not registered through the gdal_aspatial extension.</li>
 </ul>
 
 <h2>SQL</h2>
@@ -72,7 +66,7 @@ Starting with GDAL 2.0, the following SQL functions, from the GeoPackage specifi
 <li>ST_MaxY(geom <i>Geometry</i>) : returns the maximum Y coordinate of the geometry</li>
 <li>ST_IsEmpty(geom <i>Geometry</i>) : returns 1 is the geometry is empty (but not null), e.g. a POINT EMPTY geometry</li>
 <li>ST_GeometryType(geom <i>Geometry</i>) : returns the geometry type : 'POINT',
-'LINESTRING', 'POLYGON', 'MULTIPOLYGON', 'MULITLINESTRING', 'MULTIPOINT', 'GEOMETRYCOLLECTION'</li>
+'LINESTRING', 'POLYGON', 'MULTIPOLYGON', 'MULTILINESTRING', 'MULTIPOINT', 'GEOMETRYCOLLECTION'</li>
 <li>ST_SRID(geom <i>Geometry</i>) : returns the SRID of the geometry</li>
 <li>GPKG_IsAssignable(expected_geom_type <i>String</i>, actual_geom_type <i>String</i>) : mainly, needed for the 'Geometry Type Triggers Extension'</li>
 </ul>
@@ -191,13 +185,50 @@ although it can be through direct SQL commands).</p>
 domain can be used in read/write to read from/update the corresponding columns of
 the gpkg_contents table.</p>
 
+<h3>Non-spatial tables</h3>
+
+<p>The core GeoPackage specification of GeoPackage 1.0 and 1.1 did not support
+non-spatial tables. This was added in GeoPackage 1.2 as the "attributes"
+data type.</p>
+
+<p>Starting with GDAL 2.0, the driver allows creating and reading non-spatial
+tables with the     <a href="geopackage_aspatial.html">Aspatial Support</a>
+(<code>gdal_aspatial</code>) extension.</p>
+
+<p>Starting with GDAL 2.2, the driver will also, by default, list non spatial tables
+that are not registered through the gdal_aspatial extension, and support the
+GeoPackage 1.2 "attributes" data type as well. Starting with GDAL 2.2, non
+spatial tables are by default created following the GeoPackage 1.2 "attributes"
+data type (can be controlled with the ASPATIAL_VARIANT layer creation option)</p>
+
+<h3>Spatial views</h3>
+
+<p>Views can be created and recognized as valid spatial layers if a corresponding
+record is inserted into the gpkg_contents and gpkg_geometry_columns table.</p>
+
+<p>Starting with GDAL 2.2, in the case of the columns in the SELECT clause of
+the view acts a integer primary key, then it can be recognized by OGR as the
+FID column of the view, provided it is renamed as OGC_FID. Selecting a feature
+id from a source table without renaming will not be sufficient, since due to
+joins this feature id could appear several times. Thus the user must explicitly
+acknowledge that the column is really a primary key.</p>
+
+<p>For example:</p>
+<pre>
+CREATE VIEW my_view AS SELECT foo.fid AS OGC_FID, foo.geom, ... FROM foo JOIN another_table ON foo.some_id = another_table.other_id
+INSERT INTO gpkg_contents (table_name, identifier, data_type, srs_id) VALUES ( 'my_view', 'my_view', 'features', 4326)
+INSERT INTO gpkg_geometry_columns (table_name, column_name, geometry_type_name, srs_id, z, m) values ('my_view', 'my_geom', 'GEOMETRY', 4326, 0, 0)
+</pre>
+
 <h3>Examples</h3>
 
 <ul>
 <li>
 Simple translation of a single shapefile into GeoPackage.  The table 'abc' will
 be created with the features from abc.shp and attributes from abc.dbf.
-The file <code>filename.gpkg</code> must <strong>not</strong> already exist, as it will be created.
+The file <code>filename.gpkg</code> must <strong>not</strong> already exist,
+as it will be created. For adding new layers into existing geopackage run 
+ogr2ogr with <strong>-update</strong>.
 <pre>
 % ogr2ogr -f GPKG filename.gpkg abc.shp
 </pre>

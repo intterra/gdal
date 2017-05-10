@@ -38,9 +38,42 @@ if os.path.basename(sys.argv[0]) == os.path.basename(__file__):
         os.chdir(os.path.dirname(sys.argv[0]))
 
 sys.path.append( '../pymod' )
+sys.path.append('../../gdal/swig/python/samples')
 
 from osgeo import osr, gdal
 import gdaltest
+
+###############################################################################
+# Validate a geopackage
+
+try:
+    import validate_gpkg
+    has_validate = True
+except:
+    has_validate = False
+
+def validate(filename, quiet = False):
+    if has_validate:
+        my_filename = filename
+        if my_filename.startswith('/vsimem/'):
+            my_filename = 'tmp/validate.gpkg'
+            f = gdal.VSIFOpenL(filename, 'rb')
+            if f is None:
+                print('Cannot open %s' % filename)
+                return False
+            content = gdal.VSIFReadL(1, 10000000, f)
+            gdal.VSIFCloseL(f)
+            open(my_filename, 'wb').write(content)
+        try:
+            validate_gpkg.check(my_filename)
+        except Exception as e:
+            if not quiet:
+                print(e)
+            return False
+        finally:
+            if my_filename != filename:
+                os.unlink(my_filename)
+    return True
 
 ###############################################################################
 # Test if GPKG and tile drivers are available
@@ -196,7 +229,20 @@ def gpkg_1():
     out_ds = None
     ds = None
 
+    if not validate('/vsimem/tmp.gpkg'):
+        gdaltest.post_reason('validation failed')
+        return 'fail'
+
     out_ds = gdal.Open('/vsimem/tmp.gpkg')
+
+    # Check there's no ogr_empty_table
+    sql_lyr = out_ds.ExecuteSQL("SELECT COUNT(*) FROM sqlite_master WHERE name = 'ogr_empty_table'")
+    f = sql_lyr.GetNextFeature()
+    if f.GetField(0) != 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    out_ds.ReleaseResultSet(sql_lyr)
+
     got_gt = out_ds.GetGeoTransform()
     for i in range(6):
         if abs(expected_gt[i]-got_gt[i])>1e-8:
@@ -401,6 +447,10 @@ def gpkg_3():
 
     out_ds = gdaltest.gpkg_dr.CreateCopy('/vsimem/tmp.gpkg', ds, options = ['TILE_FORMAT=WEBP'] )
     out_ds = None
+
+    if not validate('/vsimem/tmp.gpkg'):
+        gdaltest.post_reason('validation failed')
+        return 'fail'
 
     out_ds = gdal.OpenEx('/vsimem/tmp.gpkg')
     got_cs = [out_ds.GetRasterBand(i+1).Checksum() for i in range(3)]
@@ -1608,6 +1658,10 @@ def gpkg_17():
     out_ds = None
     ds = None
 
+    if not validate('/vsimem/tmp.gpkg'):
+        gdaltest.post_reason('validation failed')
+        return 'fail'
+
     out_ds = gdal.Open('/vsimem/tmp.gpkg')
     got_cs = out_ds.GetRasterBand(1).GetOverview(0).Checksum()
     if got_cs != 1087:
@@ -2422,7 +2476,7 @@ def gpkg_22(tile_drv_name = 'PNG'):
     got_cs = [out_ds.GetRasterBand(i+1).Checksum() for i in range(4)]
     expected_cs = [ expected_cs[0], expected_cs[0], expected_cs[0], expected_cs[1] ]
     if got_cs != expected_cs:
-        if tile_drv_name != 'WEBP' or got_cs != [4899, 4899, 4899, 10807]:
+        if tile_drv_name != 'WEBP' or (got_cs != [4899, 4899, 4899, 10807] and got_cs != [4899, 4984, 4899, 10807]):
             gdaltest.post_reason('fail')
             print('Got %s, expected %s' % (str(got_cs), str(expected_cs)))
             return 'fail'
@@ -2431,7 +2485,7 @@ def gpkg_22(tile_drv_name = 'PNG'):
     ds = gdal.OpenEx('/vsimem/tmp.gpkg', open_options = ['USE_TILE_EXTENT=YES'])
     got_cs = [ds.GetRasterBand(i+1).Checksum() for i in range(4)]
     if got_cs != clamped_expected_cs:
-        if tile_drv_name != 'WEBP' or got_cs != [5266, 5266, 5266, 11580]:
+        if tile_drv_name != 'WEBP' or (got_cs != [5266, 5266, 5266, 11580] and got_cs != [5266, 5310, 5266, 11580]):
             gdaltest.post_reason('fail')
             print('Got %s, expected %s' % (str(got_cs), str(clamped_expected_cs)))
             return 'fail'
@@ -2993,7 +3047,21 @@ def gpkg_39():
 
     src_ds = gdal.Open('data/int16.tif')
     gdal.Translate('/vsimem/gpkg_39.gpkg', src_ds, format = 'GPKG')
+
+    if not validate('/vsimem/gpkg_39.gpkg'):
+        gdaltest.post_reason('validation failed')
+        return 'fail'
+
     ds = gdal.Open('/vsimem/gpkg_39.gpkg')
+
+    # Check there a ogr_empty_table
+    sql_lyr = ds.ExecuteSQL("SELECT COUNT(*) FROM sqlite_master WHERE name = 'ogr_empty_table'")
+    f = sql_lyr.GetNextFeature()
+    if f.GetField(0) != 1:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds.ReleaseResultSet(sql_lyr)
+
     if ds.GetRasterBand(1).DataType != gdal.GDT_Int16:
         gdaltest.post_reason('fail')
         return 'fail'
@@ -3008,20 +3076,19 @@ def gpkg_39():
         return 'fail'
     ds.ReleaseResultSet(sql_lyr)
     sql_lyr = ds.ExecuteSQL('PRAGMA application_id')
-    if sql_lyr is not None:
-        f = sql_lyr.GetNextFeature()
-        if f['application_id'] != 1196444487:
-            gdaltest.post_reason('fail')
-            f.DumpReadable()
-            return 'fail'
-        ds.ReleaseResultSet(sql_lyr)
-        sql_lyr = ds.ExecuteSQL('PRAGMA user_version')
-        f = sql_lyr.GetNextFeature()
-        if f['user_version'] != 10200:
-            gdaltest.post_reason('fail')
-            f.DumpReadable()
-            return 'fail'
-        ds.ReleaseResultSet(sql_lyr)
+    f = sql_lyr.GetNextFeature()
+    if f['application_id'] != 1196444487:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    ds.ReleaseResultSet(sql_lyr)
+    sql_lyr = ds.ExecuteSQL('PRAGMA user_version')
+    f = sql_lyr.GetNextFeature()
+    if f['user_version'] != 10200:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    ds.ReleaseResultSet(sql_lyr)
 
     # Statistics not available on partial tile without nodata
     md = ds.GetRasterBand(1).GetMetadata()
@@ -3093,6 +3160,16 @@ def gpkg_39():
         return 'fail'
 
     gdal.Translate('/vsimem/gpkg_39.gpkg', src_ds, format = 'GPKG', noData = 1, creationOptions = ['TILING_SCHEME=GoogleMapsCompatible'])
+    ds = gdal.Open('/vsimem/gpkg_39.gpkg')
+    cs = ds.GetRasterBand(1).Checksum()
+    if cs != 4118 and cs != 4077:
+        gdaltest.post_reason('fail')
+        print(cs)
+        return 'fail'
+
+    gdal.SetConfigOption('GPKG_ADD_DEFINITION_12_063', 'YES')
+    gdal.Translate('/vsimem/gpkg_39.gpkg', src_ds, format = 'GPKG', noData = 1, creationOptions = ['TILING_SCHEME=GoogleMapsCompatible'])
+    gdal.SetConfigOption('GPKG_ADD_DEFINITION_12_063', None)
     ds = gdal.Open('/vsimem/gpkg_39.gpkg')
     cs = ds.GetRasterBand(1).Checksum()
     if cs != 4118 and cs != 4077:
@@ -3298,6 +3375,11 @@ yllcorner    3750120
 cellsize     60
 -100000 100000""")
     gdal.Translate('/vsimem/gpkg_39.gpkg', '/vsimem/gpkg_39.asc', format = 'GPKG', outputType = gdal.GDT_Float32, creationOptions = ['TILE_FORMAT=PNG'])
+
+    if not validate('/vsimem/gpkg_39.gpkg'):
+        gdaltest.post_reason('validation failed')
+        return 'fail'
+
     src_ds = gdal.Open('/vsimem/gpkg_39.asc')
     ds = gdal.Open('/vsimem/gpkg_39.gpkg')
     if ds.GetRasterBand(1).DataType != gdal.GDT_Float32:
@@ -3370,78 +3452,74 @@ def gpkg_40():
     gdal.Translate('/vsimem/gpkg_40.gpkg', src_ds, format = 'GPKG')
     ds = gdal.Open('/vsimem/gpkg_40.gpkg')
     sql_lyr = ds.ExecuteSQL('PRAGMA application_id')
-    if sql_lyr is not None:
-        f = sql_lyr.GetNextFeature()
-        if f['application_id'] != 1196437808:
-            gdaltest.post_reason('fail')
-            f.DumpReadable()
-            return 'fail'
-        ds.ReleaseResultSet(sql_lyr)
-        sql_lyr = ds.ExecuteSQL('PRAGMA user_version')
-        f = sql_lyr.GetNextFeature()
-        if f['user_version'] != 0:
-            gdaltest.post_reason('fail')
-            f.DumpReadable()
-            return 'fail'
-        ds.ReleaseResultSet(sql_lyr)
+    f = sql_lyr.GetNextFeature()
+    if f['application_id'] != 1196437808:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    ds.ReleaseResultSet(sql_lyr)
+    sql_lyr = ds.ExecuteSQL('PRAGMA user_version')
+    f = sql_lyr.GetNextFeature()
+    if f['user_version'] != 0:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    ds.ReleaseResultSet(sql_lyr)
 
     # Should default to 1.2 if we didn't override it.
     gdal.Translate('/vsimem/gpkg_40.gpkg', src_ds, format = 'GPKG',
                    outputType = gdal.GDT_Int16, creationOptions = ['VERSION=1.0'])
     ds = gdal.Open('/vsimem/gpkg_40.gpkg')
     sql_lyr = ds.ExecuteSQL('PRAGMA application_id')
-    if sql_lyr is not None:
-        f = sql_lyr.GetNextFeature()
-        if f['application_id'] != 1196437808:
-            gdaltest.post_reason('fail')
-            f.DumpReadable()
-            return 'fail'
-        ds.ReleaseResultSet(sql_lyr)
-        sql_lyr = ds.ExecuteSQL('PRAGMA user_version')
-        f = sql_lyr.GetNextFeature()
-        if f['user_version'] != 0:
-            gdaltest.post_reason('fail')
-            f.DumpReadable()
-            return 'fail'
-        ds.ReleaseResultSet(sql_lyr)
+    f = sql_lyr.GetNextFeature()
+    if f['application_id'] != 1196437808:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    ds.ReleaseResultSet(sql_lyr)
+    sql_lyr = ds.ExecuteSQL('PRAGMA user_version')
+    f = sql_lyr.GetNextFeature()
+    if f['user_version'] != 0:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    ds.ReleaseResultSet(sql_lyr)
 
     gdal.Translate('/vsimem/gpkg_40.gpkg', src_ds, format = 'GPKG',
                    creationOptions = ['VERSION=1.1'])
     ds = gdal.Open('/vsimem/gpkg_40.gpkg')
     sql_lyr = ds.ExecuteSQL('PRAGMA application_id')
-    if sql_lyr is not None:
-        f = sql_lyr.GetNextFeature()
-        if f['application_id'] != 1196437809:
-            gdaltest.post_reason('fail')
-            f.DumpReadable()
-            return 'fail'
-        ds.ReleaseResultSet(sql_lyr)
-        sql_lyr = ds.ExecuteSQL('PRAGMA user_version')
-        f = sql_lyr.GetNextFeature()
-        if f['user_version'] != 0:
-            gdaltest.post_reason('fail')
-            f.DumpReadable()
-            return 'fail'
-        ds.ReleaseResultSet(sql_lyr)
+    f = sql_lyr.GetNextFeature()
+    if f['application_id'] != 1196437809:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    ds.ReleaseResultSet(sql_lyr)
+    sql_lyr = ds.ExecuteSQL('PRAGMA user_version')
+    f = sql_lyr.GetNextFeature()
+    if f['user_version'] != 0:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    ds.ReleaseResultSet(sql_lyr)
 
     gdal.Translate('/vsimem/gpkg_40.gpkg', src_ds, format = 'GPKG',
                    creationOptions = ['VERSION=1.2'])
     ds = gdal.Open('/vsimem/gpkg_40.gpkg')
     sql_lyr = ds.ExecuteSQL('PRAGMA application_id')
-    if sql_lyr is not None:
-        f = sql_lyr.GetNextFeature()
-        if f['application_id'] != 1196444487:
-            gdaltest.post_reason('fail')
-            f.DumpReadable()
-            return 'fail'
-        ds.ReleaseResultSet(sql_lyr)
-        sql_lyr = ds.ExecuteSQL('PRAGMA user_version')
-        f = sql_lyr.GetNextFeature()
-        if f['user_version'] != 10200:
-            gdaltest.post_reason('fail')
-            f.DumpReadable()
-            return 'fail'
-        ds.ReleaseResultSet(sql_lyr)
+    f = sql_lyr.GetNextFeature()
+    if f['application_id'] != 1196444487:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    ds.ReleaseResultSet(sql_lyr)
+    sql_lyr = ds.ExecuteSQL('PRAGMA user_version')
+    f = sql_lyr.GetNextFeature()
+    if f['user_version'] != 10200:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    ds.ReleaseResultSet(sql_lyr)
 
     gdal.Unlink('/vsimem/gpkg_40.gpkg')
 
@@ -3462,6 +3540,81 @@ def gpkg_41():
                         format = 'GPKG', creationOptions = [
                             'BLOCKXSIZE=500000000', 'BLOCKYSIZE=1' ])
     gdal.SetConfigOption('GPKG_ALLOW_CRAZY_SETTINGS', None)
+    return 'success'
+
+###############################################################################
+# Test opening in vector mode a database without gpkg_geometry_columns
+
+def gpkg_42():
+
+    if gdaltest.gpkg_dr is None:
+        return 'skip'
+
+    gdal.SetConfigOption('CREATE_GEOMETRY_COLUMNS', 'NO')
+    gdal.Translate('/vsimem/gpkg_42.gpkg', 'data/byte.tif', format = 'GPKG')
+    gdal.SetConfigOption('CREATE_GEOMETRY_COLUMNS', None)
+
+    ds = gdal.OpenEx('/vsimem/gpkg_42.gpkg', gdal.OF_VECTOR | gdal.OF_UPDATE)
+    sql_lyr = ds.ExecuteSQL("SELECT 1 FROM sqlite_master WHERE name = 'gpkg_geometry_columns'")
+    fc = sql_lyr.GetFeatureCount()
+    ds.ReleaseResultSet(sql_lyr)
+    if fc != 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    lyr = ds.CreateLayer('test')
+    if lyr is None:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds.FlushCache()
+    if gdal.GetLastErrorMsg() != '':
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds = None
+
+    gdal.Unlink('/vsimem/gpkg_42.gpkg')
+
+    return 'success'
+
+###############################################################################
+# Test adding raster to a database without pre-existing raster support tables.
+
+def gpkg_43():
+
+    if gdaltest.gpkg_dr is None:
+        return 'skip'
+
+    gdal.SetConfigOption('CREATE_RASTER_TABLES', 'NO')
+    ds = gdaltest.gpkg_dr.Create('/vsimem/gpkg_43.gpkg', 0, 0, 0, gdal.GDT_Unknown)
+    gdal.SetConfigOption('CREATE_RASTER_TABLES', None)
+    ds.CreateLayer('foo')
+    ds = None
+
+    ds = gdal.OpenEx('/vsimem/gpkg_43.gpkg', gdal.OF_UPDATE)
+    sql_lyr = ds.ExecuteSQL("SELECT 1 FROM sqlite_master WHERE name = 'gpkg_tile_matrix_set'")
+    fc = sql_lyr.GetFeatureCount()
+    ds.ReleaseResultSet(sql_lyr)
+    if fc != 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds = None
+
+    gdal.Translate('/vsimem/gpkg_43.gpkg', 'data/byte.tif',
+                   format = 'GPKG', creationOptions = ['APPEND_SUBDATASET=YES'])
+    ds = gdal.OpenEx('/vsimem/gpkg_43.gpkg')
+    if ds.GetRasterBand(1).Checksum() != 4672:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if ds.GetLayerCount() != 1:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds = None
+
+    if not validate('/vsimem/gpkg_43.gpkg'):
+        gdaltest.post_reason('validation failed')
+        return 'fail'
+
+    gdal.Unlink('/vsimem/gpkg_43.gpkg')
+
     return 'success'
 
 ###############################################################################
@@ -3527,6 +3680,8 @@ gdaltest_list = [
     gpkg_39,
     gpkg_40,
     gpkg_41,
+    gpkg_42,
+    gpkg_43,
     gpkg_cleanup,
 ]
 #gdaltest_list = [ gpkg_init, gpkg_39, gpkg_cleanup ]

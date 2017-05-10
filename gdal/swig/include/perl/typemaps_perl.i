@@ -1367,6 +1367,10 @@ IF_UNDEF_NULL(const char *, target_key)
     $1 = (void *)(&saved_env);
 }
 
+%typemap(typecheck, precedence=SWIG_TYPECHECK_INTEGER) GDALProgressFunc callback {
+    /* %typemap(typecheck, precedence=SWIG_TYPECHECK_INTEGER) GDALProgressFunc callback */
+   $1 = SvOK($input) && SvROK($input) && SvTYPE(SvRV($input)) == SVt_PVCV;
+}
 %typemap(in) (GDALProgressFunc callback = NULL)
 {
     /* %typemap(in) (GDALProgressFunc callback = NULL) */
@@ -1554,6 +1558,17 @@ IF_UNDEF_NULL(const char *, target_key)
 %typemap(freearg) (const char* name)
 {
     /* %typemap(freearg) (const char* name) */
+    if (tmpbuf$argnum) Safefree(tmpbuf$argnum);
+}
+
+%typemap(in, numinputs=1, fragment="sv_to_utf8_string") (const char* field_name) (U8 *tmpbuf = NULL)
+{
+    /* %typemap(in,numinputs=1) (const char* field_name) */
+    $1 = sv_to_utf8_string($input, &tmpbuf);
+}
+%typemap(freearg) (const char* field_name)
+{
+    /* %typemap(freearg) (const char* field_name) */
     if (tmpbuf$argnum) Safefree(tmpbuf$argnum);
 }
 

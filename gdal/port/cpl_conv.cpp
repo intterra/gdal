@@ -268,8 +268,7 @@ void * CPLRealloc( void * pData, size_t nNewSize )
  *
  * This function is similar to the C library strdup() function, but if
  * the memory allocation fails it will issue a CE_Fatal error with
- * CPLError() instead of returning NULL.  It uses VSIStrdup(), so any
- * hooking of that function will apply to CPLStrdup() as well.  Memory
+ * CPLError() instead of returning NULL. Memory
  * allocated with CPLStrdup() can be freed with CPLFree() or VSIFree().
  *
  * It is also safe to pass a NULL string into CPLStrdup().  CPLStrdup()
@@ -287,16 +286,10 @@ char *CPLStrdup( const char * pszString )
     if( pszString == NULL )
         pszString = "";
 
-    char *pszReturn = static_cast<char *>(CPLMalloc(strlen(pszString) + 1));
-    if( pszReturn == NULL )
-    {
-        CPLError(CE_Fatal, CPLE_OutOfMemory,
-                 "CPLStrdup(): Out of memory allocating %ld bytes.",
-                 static_cast<long>(strlen(pszString)));
-    }
-
-    strcpy(pszReturn, pszString);
-    return pszReturn;
+    const size_t nLen = strlen(pszString);
+    char* pszReturn = static_cast<char *>(CPLMalloc(nLen+1));
+    memcpy( pszReturn, pszString, nLen+1 );
+    return( pszReturn );
 }
 
 /************************************************************************/
@@ -1592,7 +1585,8 @@ static void CPLAccessConfigOption( const char *pszKey, bool bGet )
   * Get the value of a configuration option.
   *
   * The value is the value of a (key, value) option set with
-  * CPLSetConfigOption().  If the given option was no defined with
+  * CPLSetConfigOption(), or CPLSetThreadLocalConfigOption() of the same
+  * thread. If the given option was no defined with
   * CPLSetConfigOption(), it tries to find it in environment variables.
   *
   * Note: the string returned by CPLGetConfigOption() might be short-lived, and
@@ -1688,7 +1682,7 @@ char** CPLGetConfigOptions(void)
   * This does not affect options set through environment variables or with
   * CPLSetThreadLocalConfigOption().
   *
-  * The passed list is copied by the funtion.
+  * The passed list is copied by the function.
   *
   * @param papszConfigOptions the new list (or NULL).
   *
@@ -1796,10 +1790,12 @@ static void CPLSetThreadLocalTLSFreeFunc( void *pData )
   *
   * This function sets the configuration option that only applies in the
   * current thread, as opposed to CPLSetConfigOption() which sets an option
-  * that applies on all threads.
+  * that applies on all threads. CPLSetThreadLocalConfigOption() will override
+  * the effect of CPLSetConfigOption) for the current thread.
   *
   * This function can also be used to clear a setting by passing NULL as the
-  * value (note: passing NULL will not unset an existing environment variable;
+  * value (note: passing NULL will not unset an existing environment variable or
+  * a value set through CPLSetConfigOption();
   * it will just unset a value previously set by
   * CPLSetThreadLocalConfigOption()).
   *
@@ -1865,7 +1861,7 @@ char** CPLGetThreadLocalConfigOptions(void)
   * This does not affect options set through environment variables or with
   * CPLSetConfigOption().
   *
-  * The passed list is copied by the funtion.
+  * The passed list is copied by the function.
   *
   * @param papszConfigOptions the new list (or NULL).
   *

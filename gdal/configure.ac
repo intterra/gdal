@@ -183,6 +183,20 @@ if test "x$CXX" = x ; then
   AC_MSG_ERROR("You don't have a working C++ compiler.")
 fi
 
+AC_MSG_CHECKING([for std::isnan])
+AC_LANG_PUSH([C++])
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM(
+  [[#include <cmath>
+    int CPLIsNan(float f) { return std::isnan(f); }]])],
+  [
+    AC_MSG_RESULT([yes])
+    AC_DEFINE_UNQUOTED(HAVE_STD_IS_NAN, 1,
+          [Define to 1 if you have the `std::isnan' function.])
+  ], [
+    AC_MSG_RESULT([no])
+  ])
+AC_LANG_POP([C++])
+
 dnl switch between libtool and native build system
 AC_ARG_WITH(libtool, [  --without-libtool     Don't use libtool to build the library],,)
 
@@ -767,6 +781,10 @@ if test "$with_hide_internal_symbols" = "yes"; then
         AC_MSG_RESULT([yes])
         CFLAGS="$CFLAGS -fvisibility=hidden"
         CXXFLAGS="$CXXFLAGS -fvisibility=hidden"
+        CFLAGS_NOFTRAPV="$CFLAGS_NOFTRAPV -fvisibility=hidden"
+        CXXFLAGS_NOFTRAPV="$CXXFLAGS_NOFTRAPV -fvisibility=hidden"
+        CXXFLAGS_NO_LTO_IF_AVX_NONDEFAULT="$CXXFLAGS_NO_LTO_IF_AVX_NONDEFAULT -fvisibility=hidden"
+        CXXFLAGS_NO_LTO_IF_SSSE3_NONDEFAULT="$CXXFLAGS_NO_LTO_IF_SSSE3_NONDEFAULT -fvisibility=hidden"
     else
         AC_MSG_RESULT([no])
     fi
@@ -3351,7 +3369,7 @@ else
         rm -f islibdappost310.*
         echo '#include "Connect.h"' > islibdappost310.cpp
         echo 'int main(int argc, char** argv) { return 0; } ' >> islibdappost310.cpp
-        if test -z "`${CXX} islibdappost310.cpp -c ${DODS_INC} ${CPPFLAGS} 2>&1`" ; then
+        if test -z "`${CXX} ${CXXFLAGS} islibdappost310.cpp -c ${DODS_INC} ${CPPFLAGS} 2>&1`" ; then
         dnl yes, libdap >= 3.10
             DODS_INC="$DODS_INC -DLIBDAP_310 -DLIBDAP_39"
             AC_MSG_RESULT([libdap >= 3.10])
@@ -3366,7 +3384,7 @@ else
             echo '#include "AttrTable.h"' >> islibdappre39.cpp
             echo 'using namespace libdap;' >> islibdappre39.cpp
             echo 'int main(int argc, char** argv) { DAS oDAS; AttrTable& oAttrTable = oDAS; } ' >> islibdappre39.cpp
-            if test -z "`${CXX} islibdappre39.cpp -c ${DODS_INC} 2>&1`" ; then
+            if test -z "`${CXX} ${CXXFLAGS} islibdappre39.cpp -c ${DODS_INC} 2>&1`" ; then
             dnl yes, libdap < 3.9
                 AC_MSG_RESULT([libdap < 3.9])
             else
@@ -3696,38 +3714,45 @@ fi
 AC_SUBST(HAVE_PCRE)
 
 dnl ---------------------------------------------------------------------------
-dnl Check for DWGdirect.
+dnl Check for Teigha.
 dnl ---------------------------------------------------------------------------
 
-DWGDIRECT=
-DWG_PLT=
+TEIGHA_DIR=
 
-AC_MSG_CHECKING(Checking for DWGdirect)
-AC_ARG_WITH(dwgdirect,
-    [  --with-dwgdirect[=path] Include DWG direct support],
+AC_MSG_CHECKING(Checking for Teigha)
+AC_ARG_WITH(teigha,
+    [  --with-teigha[=path] Include Teigha DWG/DGN support],
     ,,)
 
-if test -z "$with_dwgdirect" -o "$with_dwgdirect" = "no"; then
+if test -z "$with_teigha" -o "$with_teigha" = "no"; then
     AC_MSG_RESULT(disabled)
-    HAVE_DWGDIRECT=no
+    HAVE_TEIGHA=no
 else
     AC_MSG_RESULT(enabled)
 
-    AC_ARG_WITH(dwgdirect,
-      [  --with-dwg-plt[=platform] DWGdirect Platform, defaults to lnxX86],
+    AC_ARG_WITH(teigha-plt,
+      [  --with-teigha-plt[=platform] Teigha platform],
       ,,)
-    if test "x$with_dwg_plt" != "x" ; then
-        DWG_PLT=$with_dwg_plt
+    if test "x$with_teigha_plt" != "x" ; then
+        TEIGHA_DIR=$with_teigha
+        HAVE_TEIGHA=yes
+        TEIGHA_PLT=$with_teigha_plt
+        LIBS="${LIBS} ${TEIGHA_DIR}/bin/${TEIGHA_PLT}/TG_Db.tx"
+        LIBS="${LIBS} ${TEIGHA_DIR}/lib/${TEIGHA_PLT}/libTG_ExamplesCommon.a"
+        LIBS="${LIBS} ${TEIGHA_DIR}/lib/${TEIGHA_PLT}/libTD_ExamplesCommon.a"
+        LIBS="${LIBS} ${TEIGHA_DIR}/lib/${TEIGHA_PLT}/libTD_Key.a"
+        LIBS="${LIBS} -L${TEIGHA_DIR}/bin/${TEIGHA_PLT} -lTD_Db"
+        LIBS="${LIBS} -L${TEIGHA_DIR}/bin/${TEIGHA_PLT} -lTD_DbRoot"
+        LIBS="${LIBS} -L${TEIGHA_DIR}/bin/${TEIGHA_PLT} -lTD_Root"
+        LIBS="${LIBS} -L${TEIGHA_DIR}/bin/${TEIGHA_PLT} -lTD_Ge"
+        LIBS="${LIBS} -L${TEIGHA_DIR}/bin/${TEIGHA_PLT} -lTD_Alloc"
     else
-        DWG_PLT=lnxX86
+        AC_MSG_ERROR([--with-teigha-plt not specified])
     fi
-    DWGDIRECT=$with_dwgdirect
-    HAVE_DWGDIRECT=yes
 fi
 
-dnl This is used by the GNUmakefile in frmts/dods (via GDALmake.opt)
-AC_SUBST(DWG_PLT)
-AC_SUBST(DWGDIRECT)
+AC_SUBST(TEIGHA_DIR)
+AC_SUBST(HAVE_TEIGHA)
 
 dnl ---------------------------------------------------------------------------
 dnl Select Informix DataBlade support
@@ -4392,7 +4417,7 @@ if test "$with_podofo" != "no" -a "$with_podofo" != ""; then
         rm -f testpodofo.*
         echo '#include <podofo.h>' > testpodofo.cpp
         echo 'int main(int argc, char** argv) { PoDoFo::PdfError::EnableDebug( 0 ); return 0; } ' >> testpodofo.cpp
-        ${CXX} testpodofo.cpp -o testpodofo ${TEST_PODOFO_INC} ${PODOFO_LIB} 2>/dev/null
+        ${CXX} ${CXXFLAGS} ${LDFLAGS} testpodofo.cpp -o testpodofo ${TEST_PODOFO_INC} ${PODOFO_LIB} 2>/dev/null
         RETVAL=$?
         if test $RETVAL -eq 0; then
             HAVE_PODOFO=yes
@@ -4427,7 +4452,7 @@ if test "$with_podofo" != "no" -a "$with_podofo" != ""; then
         rm -f testpodofo.*
         echo '#include <podofo.h>' > testpodofo.cpp
         echo 'int main(int argc, char** argv) { PoDoFo::PdfError::EnableDebug( 0 ); return 0; } ' >> testpodofo.cpp
-        ${CXX} testpodofo.cpp -o testpodofo ${TEST_PODOFO_INC} ${TEST_PODOFO_LIB} 2>/dev/null
+        ${CXX} ${CXXFLAGS} ${LDFLAGS} testpodofo.cpp -o testpodofo ${TEST_PODOFO_INC} ${TEST_PODOFO_LIB} 2>/dev/null
         RETVAL=$?
         if test $RETVAL -eq 0; then
             HAVE_PODOFO=yes
@@ -5252,7 +5277,7 @@ elif test "$with_cryptopp" = "yes" -o "$with_cryptopp" = "" ; then
     # Catch issue with clang++ (https://groups.google.com/forum/#!topic/cryptopp-users/DfWHy3bT0KI)
     echo '#include <cryptopp/osrng.h>' >> testcryptopp.cpp
     echo 'int main(int argc, char** argv) { CryptoPP::AES::Encryption oEnc; return 0; } ' >> testcryptopp.cpp
-    ${CXX} ${CXXFLAGS} testcryptopp.cpp -o testcryptopp -lcryptopp 2>/dev/null
+    ${CXX} ${CXXFLAGS} ${LDFLAGS} testcryptopp.cpp -o testcryptopp -lcryptopp 2>/dev/null
     RETVAL=$?
     if test $RETVAL -eq 0; then
         HAVE_CRYPTOPP=yes
@@ -5273,7 +5298,7 @@ elif test "$with_cryptopp" = "yes" -o "$with_cryptopp" = "" ; then
         rm -f testcryptopp.*
         echo '#include <cryptopp/blowfish.h>' > testcryptopp.cpp
         echo 'int main(int argc, char** argv) { CryptoPP::Blowfish::Encryption oEnc; return 0; } ' >> testcryptopp.cpp
-        ${CXX} ${CXXFLAGS} testcryptopp.cpp -o testcryptopp -lcryptopp 2>/dev/null
+        ${CXX} ${CXXFLAGS} ${LDFLAGS} testcryptopp.cpp -o testcryptopp -lcryptopp 2>/dev/null
         RETVAL=$?
         if test $RETVAL -eq 0; then
             USE_ONLY_CRYPTODLL_ALG=no
@@ -5293,7 +5318,7 @@ else
     # Catch issue with clang++ (https://groups.google.com/forum/#!topic/cryptopp-users/DfWHy3bT0KI)
     echo '#include <cryptopp/osrng.h>' >> testcryptopp.cpp
     echo 'int main(int argc, char** argv) { CryptoPP::AES::Encryption oEnc; return 0; } ' >> testcryptopp.cpp
-    ${CXX} ${CXXFLAGS} testcryptopp.cpp -I$with_cryptopp/include -o testcryptopp -L$with_cryptopp/lib -lcryptopp 2>/dev/null
+    ${CXX} ${CXXFLAGS} ${LDFLAGS} testcryptopp.cpp -I$with_cryptopp/include -o testcryptopp -L$with_cryptopp/lib -lcryptopp 2>/dev/null
     RETVAL=$?
     if test $RETVAL -eq 0; then
         HAVE_CRYPTOPP=yes
@@ -5312,7 +5337,7 @@ else
         rm -f testcryptopp.*
         echo '#include <cryptopp/blowfish.h>' > testcryptopp.cpp
         echo 'int main(int argc, char** argv) { CryptoPP::Blowfish::Encryption oEnc; return 0; } ' >> testcryptopp.cpp
-        ${CXX} ${CXXFLAGS} testcryptopp.cpp -I$with_cryptopp/include -o testcryptopp -L$with_cryptopp/lib -lcryptopp 2>/dev/null
+        ${CXX} ${CXXFLAGS} ${LDFLAGS} testcryptopp.cpp -I$with_cryptopp/include -o testcryptopp -L$with_cryptopp/lib -lcryptopp 2>/dev/null
         RETVAL=$?
         if test $RETVAL -eq 0; then
             USE_ONLY_CRYPTODLL_ALG=no
@@ -5451,7 +5476,7 @@ if test "x$SPATIALITE_SONAME" != "x"; then
 LOC_MSG([  SpatiaLite shared obj name:${SPATIALITE_SONAME}])
 fi
 LOC_MSG([  RasterLite2 support:       ${HAVE_RASTERLITE2}])
-LOC_MSG([  DWGdirect support          ${HAVE_DWGDIRECT}])
+LOC_MSG([  Teigha (DWG and DGNv8):    ${HAVE_TEIGHA}])
 LOC_MSG([  INFORMIX DataBlade support:${HAVE_IDB}])
 LOC_MSG([  GEOS support:              ${HAVE_GEOS_RESULT}])
 LOC_MSG([  SFCGAL support:            ${HAVE_SFCGAL_RESULT}])

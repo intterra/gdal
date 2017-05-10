@@ -1,4 +1,4 @@
-/* $Id: tif_pixarlog.c,v 1.49 2016-12-02 23:05:51 erouault Exp $ */
+/* $Id: tif_pixarlog.c,v 1.51 2017-05-10 15:21:16 erouault Exp $ */
 
 /*
  * Copyright (c) 1996-1997 Sam Leffler
@@ -678,6 +678,12 @@ PixarLogSetupDecode(TIFF* tif)
 
 	assert(sp != NULL);
 
+	/* This function can possibly be called several times by */
+	/* PredictorSetupDecode() if this function succeeds but */
+	/* PredictorSetup() fails */
+	if( (sp->state & PLSTATE_INIT) != 0 )
+		return 1;
+
 	/* Make sure no byte swapping happens on the data
 	 * after decompression. */
 	tif->tif_postdecode = _TIFFNoPostDecode;  
@@ -699,6 +705,9 @@ PixarLogSetupDecode(TIFF* tif)
 	if (sp->user_datafmt == PIXARLOGDATAFMT_UNKNOWN)
 		sp->user_datafmt = PixarLogGuessDataFmt(td);
 	if (sp->user_datafmt == PIXARLOGDATAFMT_UNKNOWN) {
+                _TIFFfree(sp->tbuf);
+                sp->tbuf = NULL;
+                sp->tbuf_size = 0;
 		TIFFErrorExt(tif->tif_clientdata, module,
 			"PixarLog compression can't handle bits depth/data format combination (depth: %d)", 
 			td->td_bitspersample);
@@ -706,6 +715,9 @@ PixarLogSetupDecode(TIFF* tif)
 	}
 
 	if (inflateInit(&sp->stream) != Z_OK) {
+                _TIFFfree(sp->tbuf);
+                sp->tbuf = NULL;
+                sp->tbuf_size = 0;
 		TIFFErrorExt(tif->tif_clientdata, module, "%s", sp->stream.msg ? sp->stream.msg : "(null)");
 		return (0);
 	} else {

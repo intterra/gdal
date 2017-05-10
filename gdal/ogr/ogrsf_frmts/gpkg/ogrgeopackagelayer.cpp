@@ -29,6 +29,7 @@
 
 #include "ogr_geopackage.h"
 #include "ogrgeopackageutility.h"
+#include "ogrsqliteutility.h"
 #include "ogr_p.h"
 
 CPL_CVSID("$Id$");
@@ -163,7 +164,14 @@ OGRFeature *OGRGeoPackageLayer::TranslateFeature( sqlite3_stmt* hStmt )
 /*      Set FID if we have a column to set it from.                     */
 /* -------------------------------------------------------------------- */
     if( iFIDCol >= 0 )
+    {
         poFeature->SetFID( sqlite3_column_int64( hStmt, iFIDCol ) );
+        if( m_pszFidColumn == NULL && poFeature->GetFID() == 0 )
+        {
+            // Miht be the case for views with joins.
+            poFeature->SetFID( iNextShapeId );
+        }
+    }
     else
         poFeature->SetFID( iNextShapeId );
 
@@ -328,7 +336,7 @@ void OGRGeoPackageLayer::BuildFeatureDefn( const char *pszLayerName,
     for( int iCol = 0; iCol < nRawColumns; iCol++ )
     {
         OGRFieldDefn    oField(
-            OGRSQLiteParamsUnquote(sqlite3_column_name( hStmt, iCol )),
+            SQLUnescape(sqlite3_column_name( hStmt, iCol )),
             OFTString );
 
         // In some cases, particularly when there is a real name for

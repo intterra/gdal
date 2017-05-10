@@ -240,6 +240,16 @@ class CPL_DLL VRTWarpedDataset : public VRTDataset
 
     void              CreateImplicitOverviews();
 
+    struct VerticalShiftGrid
+    {
+        CPLString osVGrids;
+        int       bInverse;
+        double    dfToMeterSrc;
+        double    dfToMeterDest;
+        CPLStringList aosOptions;
+    };
+    std::vector<VerticalShiftGrid> m_aoVerticalShiftGrids;
+
     friend class VRTWarpedRasterBand;
 
   protected:
@@ -268,6 +278,12 @@ public:
     CPLErr            ProcessBlock( int iBlockX, int iBlockY );
 
     void              GetBlockSize( int *, int * );
+
+    void              SetApplyVerticalShiftGrid(const char* pszVGrids,
+                                             int bInverse,
+                                             double dfToMeterSrc,
+                                             double dfToMeterDest,
+                                             char** papszOptions );
 };
 
 /************************************************************************/
@@ -1013,6 +1029,8 @@ class VRTKernelFilteredSource : public VRTFilteredSource
 protected:
     int     m_nKernelSize;
 
+    bool    m_bSeparable;
+
     double  *m_padfKernelCoefs;
 
     int     m_bNormalized;
@@ -1027,7 +1045,7 @@ public:
     virtual CPLErr  FilterData( int nXSize, int nYSize, GDALDataType eType,
                                 GByte *pabySrcData, GByte *pabyDstData ) CPL_OVERRIDE;
 
-    CPLErr          SetKernel( int nKernelSize, double *padfCoefs );
+    CPLErr          SetKernel( int nKernelSize, bool bSeparable, double *padfCoefs );
     void            SetNormalized( int );
 };
 

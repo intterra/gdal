@@ -31,177 +31,24 @@
 
 CPL_CVSID("$Id$");
 
-/* Runs a SQL command and ignores the result (good for INSERT/UPDATE/CREATE) */
-OGRErr SQLCommand(sqlite3 * poDb, const char * pszSQL)
-{
-    CPLAssert( poDb != NULL );
-    CPLAssert( pszSQL != NULL );
-
-    char *pszErrMsg = NULL;
-#ifdef DEBUG_VERBOSE
-    CPLDebug("GPKG", "exec(%s)", pszSQL);
-#endif
-    int rc = sqlite3_exec(poDb, pszSQL, NULL, NULL, &pszErrMsg);
-
-    if ( rc != SQLITE_OK )
-    {
-        CPLError( CE_Failure, CPLE_AppDefined,
-                  "sqlite3_exec(%s) failed: %s",
-                  pszSQL, pszErrMsg ? pszErrMsg : "" );
-        sqlite3_free( pszErrMsg );
-        return OGRERR_FAILURE;
-    }
-
-    return OGRERR_NONE;
-}
-
-OGRErr SQLResultInit(SQLResult * poResult)
-{
-    poResult->papszResult = NULL;
-    poResult->pszErrMsg = NULL;
-    poResult->nRowCount = 0;
-    poResult->nColCount = 0;
-    poResult->rc = 0;
-    return OGRERR_NONE;
-}
-
-OGRErr SQLQuery(sqlite3 * poDb, const char * pszSQL, SQLResult * poResult)
-{
-    CPLAssert( poDb != NULL );
-    CPLAssert( pszSQL != NULL );
-    CPLAssert( poResult != NULL );
-
-    SQLResultInit(poResult);
-
-#ifdef DEBUG_VERBOSE
-    CPLDebug("GPKG", "get_table(%s)", pszSQL);
-#endif
-    poResult->rc = sqlite3_get_table(
-        poDb, pszSQL,
-        &(poResult->papszResult),
-        &(poResult->nRowCount),
-        &(poResult->nColCount),
-        &(poResult->pszErrMsg) );
-
-    if( poResult->rc != SQLITE_OK )
-    {
-        CPLError( CE_Failure, CPLE_AppDefined,
-                  "sqlite3_get_table(%s) failed: %s", pszSQL, poResult->pszErrMsg );
-        return OGRERR_FAILURE;
-    }
-
-    return OGRERR_NONE;
-}
-
-OGRErr SQLResultFree(SQLResult * poResult)
-{
-    if ( poResult->papszResult )
-        sqlite3_free_table(poResult->papszResult);
-
-    if ( poResult->pszErrMsg )
-        sqlite3_free(poResult->pszErrMsg);
-
-    return OGRERR_NONE;
-}
-
-const char* SQLResultGetValue(const SQLResult * poResult, int iColNum, int iRowNum)
-{
-    if ( ! poResult )
-        return NULL;
-
-    int nCols = poResult->nColCount;
-    int nRows = poResult->nRowCount;
-
-    if ( iColNum < 0 || iColNum >= nCols )
-        return NULL;
-
-    if ( iRowNum < 0 || iRowNum >= nRows )
-        return NULL;
-
-    return poResult->papszResult[ nCols + iRowNum * nCols + iColNum ];
-}
-
-int SQLResultGetValueAsInteger(const SQLResult * poResult, int iColNum, int iRowNum)
-{
-    if ( ! poResult )
-        return 0;
-
-    int nCols = poResult->nColCount;
-    int nRows = poResult->nRowCount;
-
-    if ( iColNum < 0 || iColNum >= nCols )
-        return 0;
-
-    if ( iRowNum < 0 || iRowNum >= nRows )
-        return 0;
-
-    char *pszValue = poResult->papszResult[ nCols + iRowNum * nCols + iColNum ];
-    if ( ! pszValue )
-        return 0;
-
-    return atoi(pszValue);
-}
-
-/* Returns the first row of first column of SQL as integer */
-GIntBig SQLGetInteger64(sqlite3 * poDb, const char * pszSQL, OGRErr *err)
-{
-    CPLAssert( poDb != NULL );
-
-    sqlite3_stmt *poStmt = NULL;
-
-    /* Prepare the SQL */
-#ifdef DEBUG_VERBOSE
-    CPLDebug("GPKG", "get(%s)", pszSQL);
-#endif
-    int rc = sqlite3_prepare_v2(poDb, pszSQL, -1, &poStmt, NULL);
-    if ( rc != SQLITE_OK )
-    {
-        CPLError( CE_Failure, CPLE_AppDefined, "sqlite3_prepare_v2(%s) failed: %s",
-                  pszSQL, sqlite3_errmsg( poDb ) );
-        if ( err ) *err = OGRERR_FAILURE;
-        return 0;
-    }
-
-    /* Execute and fetch first row */
-    rc = sqlite3_step(poStmt);
-    if ( rc != SQLITE_ROW )
-    {
-        if ( err ) *err = OGRERR_FAILURE;
-        sqlite3_finalize(poStmt);
-        return 0;
-    }
-
-    /* Read the integer from the row */
-    GIntBig i = sqlite3_column_int64(poStmt, 0);
-    sqlite3_finalize(poStmt);
-
-    if ( err ) *err = OGRERR_NONE;
-    return i;
-}
-
-int SQLGetInteger(sqlite3 * poDb, const char * pszSQL, OGRErr *err)
-{
-    return (int)SQLGetInteger64(poDb, pszSQL, err);
-}
-
 /* Requirement 20: A GeoPackage SHALL store feature table geometries */
 /* with the basic simple feature geometry types (Geometry, Point, */
 /* LineString, Polygon, MultiPoint, MultiLineString, MultiPolygon, */
 /* GeomCollection) */
 /* http://opengis.github.io/geopackage/#geometry_types */
-OGRwkbGeometryType GPkgGeometryTypeToWKB(const char *pnGpkgLenType, bool bHasZ, bool bHasM)
+OGRwkbGeometryType GPkgGeometryTypeToWKB(const char *pszGpkgType, bool bHasZ, bool bHasM)
 {
     OGRwkbGeometryType oType;
 
-    if ( EQUAL("Geometry", pnGpkgLenType) )
+    if ( EQUAL("Geometry", pszGpkgType) )
         oType = wkbUnknown;
     /* The 1.0 spec is not completely clear on what should be used... */
-    else if ( EQUAL("GeomCollection", pnGpkgLenType) ||
-              EQUAL("GeometryCollection", pnGpkgLenType) )
+    else if ( EQUAL("GeomCollection", pszGpkgType) ||
+              EQUAL("GeometryCollection", pszGpkgType) )
         oType =  wkbGeometryCollection;
     else
     {
-        oType = OGRFromOGCGeomType(pnGpkgLenType);
+        oType = OGRFromOGCGeomType(pszGpkgType);
         if( oType == wkbUnknown )
             oType = wkbNone;
     }
@@ -222,56 +69,56 @@ OGRwkbGeometryType GPkgGeometryTypeToWKB(const char *pnGpkgLenType, bool bHasZ, 
 /* declared using one of the data types specified in table GeoPackage */
 /* Data Types. */
 /* http://opengis.github.io/geopackage/#table_column_data_types */
-OGRFieldType GPkgFieldToOGR(const char *pnGpkgLenType, OGRFieldSubType& eSubType,
+OGRFieldType GPkgFieldToOGR(const char *pszGpkgType, OGRFieldSubType& eSubType,
                             int& nMaxWidth)
 {
     eSubType = OFSTNone;
     nMaxWidth = 0;
 
     /* Integer types */
-    if ( STRNCASECMP("INT", pnGpkgLenType, 3) == 0 )
+    if ( STRNCASECMP("INT", pszGpkgType, 3) == 0 )
         return OFTInteger64;
-    else if ( EQUAL("MEDIUMINT", pnGpkgLenType) )
+    else if ( EQUAL("MEDIUMINT", pszGpkgType) )
         return OFTInteger;
-    else if ( EQUAL("SMALLINT", pnGpkgLenType) )
+    else if ( EQUAL("SMALLINT", pszGpkgType) )
     {
         eSubType = OFSTInt16;
         return OFTInteger;
     }
-    else if ( EQUAL("TINYINT", pnGpkgLenType) )
-        return OFTInteger;
-    else if ( EQUAL("BOOLEAN", pnGpkgLenType) )
+    else if ( EQUAL("TINYINT", pszGpkgType) )
+        return OFTInteger; // [-128, 127]
+    else if ( EQUAL("BOOLEAN", pszGpkgType) )
     {
         eSubType = OFSTBoolean;
         return OFTInteger;
     }
 
     /* Real types */
-    else if ( EQUAL("FLOAT", pnGpkgLenType) )
+    else if ( EQUAL("FLOAT", pszGpkgType) )
     {
         eSubType = OFSTFloat32;
         return OFTReal;
     }
-    else if ( EQUAL("DOUBLE", pnGpkgLenType) )
+    else if ( EQUAL("DOUBLE", pszGpkgType) )
         return OFTReal;
-    else if ( EQUAL("REAL", pnGpkgLenType) )
+    else if ( EQUAL("REAL", pszGpkgType) )
         return OFTReal;
 
     /* String/binary types */
-    else if ( STRNCASECMP("TEXT", pnGpkgLenType, 4) == 0 )
+    else if ( STRNCASECMP("TEXT", pszGpkgType, 4) == 0 )
     {
-        if( pnGpkgLenType[4] == '(' )
-            nMaxWidth = atoi(pnGpkgLenType+5);
+        if( pszGpkgType[4] == '(' )
+            nMaxWidth = atoi(pszGpkgType+5);
         return OFTString;
     }
 
-    else if ( STRNCASECMP("BLOB", pnGpkgLenType, 4) == 0 )
+    else if ( STRNCASECMP("BLOB", pszGpkgType, 4) == 0 )
         return OFTBinary;
 
     /* Date types */
-    else if ( EQUAL("DATE", pnGpkgLenType) )
+    else if ( EQUAL("DATE", pszGpkgType) )
         return OFTDate;
-    else if ( EQUAL("DATETIME", pnGpkgLenType) )
+    else if ( EQUAL("DATETIME", pszGpkgType) )
         return OFTDateTime;
 
     /* Illegal! */
@@ -283,10 +130,10 @@ OGRFieldType GPkgFieldToOGR(const char *pnGpkgLenType, OGRFieldSubType& eSubType
 /* declared using one of the data types specified in table GeoPackage */
 /* Data Types. */
 /* http://opengis.github.io/geopackage/#table_column_data_types */
-const char* GPkgFieldFromOGR(OGRFieldType nType, OGRFieldSubType eSubType,
+const char* GPkgFieldFromOGR(OGRFieldType eType, OGRFieldSubType eSubType,
                              int nMaxWidth)
 {
-    switch(nType)
+    switch(eType)
     {
         case OFTInteger:
         {
@@ -321,27 +168,6 @@ const char* GPkgFieldFromOGR(OGRFieldType nType, OGRFieldSubType eSubType,
             return "DATETIME";
         default:
             return "TEXT";
-    }
-}
-
-int SQLiteFieldFromOGR(OGRFieldType nType)
-{
-    switch(nType)
-    {
-        case OFTInteger:
-            return SQLITE_INTEGER;
-        case OFTReal:
-            return SQLITE_FLOAT;
-        case OFTString:
-            return SQLITE_TEXT;
-        case OFTBinary:
-            return SQLITE_BLOB;
-        case OFTDate:
-            return SQLITE_TEXT;
-        case OFTDateTime:
-            return SQLITE_TEXT;
-        default:
-            return 0;
     }
 }
 
@@ -626,122 +452,4 @@ OGRGeometry* GPkgGeometryToOGR(const GByte *pabyGpkg, size_t nGpkgLen, OGRSpatia
         return NULL;
 
     return poGeom;
-}
-
-CPLString SQLEscapeDoubleQuote(const char* pszStr)
-{
-    CPLString osRet;
-    while( *pszStr != '\0' )
-    {
-        if( *pszStr == '"' )
-            osRet += "\"\"";
-        else
-            osRet += *pszStr;
-        pszStr ++;
-    }
-    return osRet;
-}
-
-CPLString SQLUnescapeDoubleQuote(const char* pszStr)
-{
-    CPLString osRet;
-    const bool bStartsWithDoubleQuote = (pszStr[0] == '"');
-    if( bStartsWithDoubleQuote )
-        pszStr ++;
-    while( *pszStr != '\0' )
-    {
-        if( bStartsWithDoubleQuote && *pszStr == '"' && pszStr[1] == '"' )
-        {
-            osRet += "\"";
-            pszStr ++;
-        }
-        else if( bStartsWithDoubleQuote && *pszStr == '"' )
-        {
-            break;
-        }
-        else
-            osRet += *pszStr;
-        pszStr ++;
-    }
-    return osRet;
-}
-
-/************************************************************************/
-/*                             SQLTokenize()                            */
-/************************************************************************/
-
-char** SQLTokenize( const char* pszStr )
-{
-    char** papszTokens = NULL;
-    bool bInQuote = false;
-    char chQuoteChar = '\0';
-    bool bInSpace = true;
-    CPLString osCurrentToken;
-    while( *pszStr != '\0' )
-    {
-        if( *pszStr == ' ' && !bInQuote )
-        {
-            if( !bInSpace )
-            {
-                papszTokens = CSLAddString(papszTokens, osCurrentToken);
-                osCurrentToken.clear();
-            }
-            bInSpace = true;
-        }
-        else if( (*pszStr == '(' || *pszStr == ')' || *pszStr == ',')  && !bInQuote )
-        {
-            if( !bInSpace )
-            {
-                papszTokens = CSLAddString(papszTokens, osCurrentToken);
-                osCurrentToken.clear();
-            }
-            osCurrentToken.clear();
-            osCurrentToken += *pszStr;
-            papszTokens = CSLAddString(papszTokens, osCurrentToken);
-            osCurrentToken.clear();
-            bInSpace = true;
-        }
-        else if( *pszStr == '"' || *pszStr == '\'' )
-        {
-            if( bInQuote && *pszStr == chQuoteChar && pszStr[1] == chQuoteChar )
-            {
-                osCurrentToken += *pszStr;
-                osCurrentToken += *pszStr;
-                pszStr += 2;
-                continue;
-            }
-            else if( bInQuote && *pszStr == chQuoteChar )
-            {
-                osCurrentToken += *pszStr;
-                papszTokens = CSLAddString(papszTokens, osCurrentToken);
-                osCurrentToken.clear();
-                bInSpace = true;
-                bInQuote = false;
-                chQuoteChar = '\0';
-            }
-            else if( bInQuote )
-            {
-                osCurrentToken += *pszStr;
-            }
-            else
-            {
-                chQuoteChar = *pszStr;
-                osCurrentToken.clear();
-                osCurrentToken += chQuoteChar;
-                bInQuote = true;
-                bInSpace = false;
-            }
-        }
-        else
-        {
-            osCurrentToken += *pszStr;
-            bInSpace = false;
-        }
-        pszStr ++;
-    }
-
-    if( !osCurrentToken.empty() )
-        papszTokens = CSLAddString(papszTokens, osCurrentToken);
-
-    return papszTokens;
 }

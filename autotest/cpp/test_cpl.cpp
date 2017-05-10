@@ -24,16 +24,16 @@
 // Boston, MA 02111-1307, USA.
 ///////////////////////////////////////////////////////////////////////////////
 
-#include <tut.hpp>
-#include <tut_gdal.h>
-#include <gdal_common.h>
-#include <string>
+#include "gdal_unit_test.h"
+
+#include <cpl_error.h>
+#include <cpl_hash_set.h>
+#include <cpl_list.h>
+#include <cpl_sha256.h>
+#include <cpl_string.h>
+
 #include <fstream>
-#include "cpl_list.h"
-#include "cpl_hash_set.h"
-#include "cpl_string.h"
-#include "cpl_sha256.h"
-#include "cpl_error.h"
+#include <string>
 
 static bool gbGotError = false;
 static void CPL_STDCALL myErrorHandler(CPLErr, CPLErrorNum, const char*)
@@ -1031,6 +1031,31 @@ namespace tut
         CPLSetThreadLocalConfigOptions(options);
         ensure_equals (CPLGetThreadLocalConfigOption("FOOFOO", "i_dont_exist"), "BAR");
         CSLDestroy(options);
+    }
+
+    template<>
+    template<>
+    void object::test<20>()
+    {
+        ensure_equals ( CPLExpandTilde("/foo/bar"), "/foo/bar" );
+
+        CPLSetConfigOption("HOME", "/foo");
+        ensure_equals ( CPLExpandTilde("~/bar"), "/foo/bar" );
+        CPLSetConfigOption("HOME", NULL);
+    }
+
+    template<>
+    template<>
+    void object::test<21>()
+    {
+        // CPLString(std::string) constructor
+        ensure_equals ( CPLString(std::string("abc")).c_str(), "abc" );
+
+        // CPLString(const char*) constructor
+        ensure_equals ( CPLString("abc").c_str(), "abc" );
+
+        // CPLString(const char*, n) constructor
+        ensure_equals ( CPLString("abc",1).c_str(), "a" );
     }
 
 } // namespace tut

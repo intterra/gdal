@@ -83,20 +83,20 @@ class GRIBDataset : public GDALPamDataset
     static GDALDataset *Open( GDALOpenInfo * );
     static int          Identify( GDALOpenInfo * );
 
-    CPLErr      GetGeoTransform( double * padfTransform ) override;
+    CPLErr      GetGeoTransform( double *padfTransform ) override;
     const char *GetProjectionRef() override;
 
   private:
-    void SetGribMetaData(grib_MetaData* meta);
-    VSILFILE    *fp;
-    char  *pszProjection;
+    void SetGribMetaData(grib_MetaData *meta);
+    VSILFILE *fp;
+    char *pszProjection;
     // Calculate and store once as GetGeoTransform may be called multiple times.
     double adfGeoTransform[6];
 
-    GIntBig  nCachedBytes;
-    GIntBig  nCachedBytesThreshold;
-    int      bCacheOnlyOneBand;
-    GRIBRasterBand* poLastUsedBand;
+    GIntBig nCachedBytes;
+    GIntBig nCachedBytesThreshold;
+    int bCacheOnlyOneBand;
+    GRIBRasterBand *poLastUsedBand;
 };
 
 /************************************************************************/
@@ -110,7 +110,7 @@ class GRIBRasterBand : public GDALPamRasterBand
     friend class GRIBDataset;
 
 public:
-    GRIBRasterBand( GRIBDataset*, int, inventoryType* );
+    GRIBRasterBand( GRIBDataset *, int, inventoryType * );
     virtual ~GRIBRasterBand();
     virtual CPLErr IReadBlock( int, int, void * ) override;
     virtual const char *GetDescription() const override;
@@ -124,15 +124,61 @@ public:
 private:
     CPLErr       LoadData();
 
-    static void ReadGribData( DataSource &, sInt4, int, double**,
-                              grib_MetaData** );
+    static void ReadGribData( DataSource &, sInt4, int, double **,
+                              grib_MetaData ** );
     sInt4 start;
     int subgNum;
     char *longFstLevel;
 
-    double * m_Grib_Data;
-    grib_MetaData* m_Grib_MetaData;
+    double *m_Grib_Data;
+    grib_MetaData *m_Grib_MetaData;
 
-    int      nGribDataXSize;
-    int      nGribDataYSize;
+    int nGribDataXSize;
+    int nGribDataYSize;
 };
+
+namespace gdal {
+namespace grib {
+
+// Thin layer to manage allocation and deallocation.
+class InventoryWrapper {
+  public:
+    explicit InventoryWrapper(const std::string &filepath)
+        : inv_(NULL), inv_len_(0), num_messages_(0), result_(0) {
+      FileDataSource grib(filepath.c_str());
+      result_ = GRIB2Inventory(grib, &inv_, &inv_len_, 0 /* all messages */,
+                               &num_messages_);
+    }
+    explicit InventoryWrapper(FileDataSource file_data_source)
+        : inv_(NULL), inv_len_(0), num_messages_(0), result_(0) {
+      result_ = GRIB2Inventory(file_data_source, &inv_, &inv_len_,
+                               0 /* all messages */, &num_messages_);
+    }
+
+    ~InventoryWrapper() {
+        if (inv_ == NULL) return;
+        for (uInt4 i = 0; i < inv_len_; i++) {
+            GRIB2InventoryFree(inv_ + i);
+        }
+        free(inv_);
+    }
+
+    // Modifying the contents pointed to by the return is allowed.
+    inventoryType * get(int i) const {
+      if (i < 0 || i >= static_cast<int>(inv_len_)) return NULL;
+      return inv_ + i;
+    }
+
+    uInt4 length() const { return inv_len_; }
+    size_t num_messages() const { return num_messages_; }
+    int result() const { return result_; }
+
+  private:
+    inventoryType *inv_;
+    uInt4 inv_len_;
+    int num_messages_;
+    int result_;
+};
+
+}  // namespace grib
+}  // namespace gdal

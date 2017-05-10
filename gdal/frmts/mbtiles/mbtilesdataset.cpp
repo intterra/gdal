@@ -421,7 +421,6 @@ char* MBTilesDataset::FindKey(int iPixel, int iLine)
         //CPLDebug("MBTILES", "Grid value = %s", (const char*)pabyUncompressed);
     }
 
-    struct json_tokener *jstok = NULL;
     json_object* jsobj = NULL;
 
     if (nUncompressedSize == 0)
@@ -429,20 +428,10 @@ char* MBTilesDataset::FindKey(int iPixel, int iLine)
         goto end;
     }
 
-    jstok = json_tokener_new();
-    jsobj = json_tokener_parse_ex(jstok, (const char*)pabyUncompressed, -1);
-    if( jstok->err != json_tokener_success)
+    if( !OGRJSonParse((const char*)pabyUncompressed, &jsobj, true) )
     {
-        CPLError( CE_Failure, CPLE_AppDefined,
-                    "JSON parsing error: %s (at offset %d)",
-                    json_tokener_error_desc(jstok->err),
-                    jstok->char_offset);
-        json_tokener_free(jstok);
-
         goto end;
     }
-
-    json_tokener_free(jstok);
 
     if (json_object_is_type(jsobj, json_type_object))
     {
@@ -1950,7 +1939,8 @@ GDALDataset* MBTilesDataset::Open(GDALOpenInfo* poOpenInfo)
             nBands = MBTilesGetBandCount(hDS, nMaxLevel,
                                          nMinTileRow, nMaxTileRow,
                                          nMinTileCol, nMaxTileCol);
-            if (nBands < 0)
+            // Map RGB to RGBA since we can guess wrong (see #6836)
+            if (nBands < 0 || nBands == 3)
                 nBands = 4;
         }
 
@@ -1970,12 +1960,21 @@ GDALDataset* MBTilesDataset::Open(GDALOpenInfo* poOpenInfo)
         poDS->InitRaster ( NULL, nMaxLevel, nBands,
                            dfMinX, dfMinY, dfMaxX, dfMaxY );
 
+        const char* pszFormat = poDS->GetMetadataItem("format");
+        if( pszFormat != NULL && EQUAL(pszFormat, "pbf") )
+        {
+            CPLDebug("MBTiles",
+                     "This files contain vector tiles, "
+                     "not supported by this driver");
+            delete poDS;
+            return NULL;
+        }
+
         if( poDS->eAccess == GA_Update )
         {
             // So that we can edit all potential overviews
             nMinLevel = 0;
 
-            const char* pszFormat = poDS->GetMetadataItem("format");
             if( pszFormat != NULL && (EQUAL(pszFormat, "jpg") || EQUAL(pszFormat, "jpeg")) )
             {
                 poDS->m_eTF = GPKG_TF_JPEG;
@@ -2612,6 +2611,12 @@ CPLErr MBTilesDataset::IBuildOverviews(
     GDALRasterBand*** papapoOverviewBands = (GDALRasterBand ***) CPLCalloc(sizeof(void*),nBands);
     int iCurOverview = 0;
     int nMinZoom = m_nZoomLevel;
+    for( int i = 0; i < m_nOverviewCount; i++ )
+    {
+        MBTilesDataset* poODS = m_papoOverviewDS[i];
+        if( poODS->m_nZoomLevel < nMinZoom )
+            nMinZoom = poODS->m_nZoomLevel;
+    }
     for( int iBand = 0; iBand < nBands; iBand++ )
     {
         papapoOverviewBands[iBand] = (GDALRasterBand **) CPLCalloc(sizeof(void*),nOverviews);
@@ -2630,8 +2635,6 @@ CPLErr MBTilesDataset::IBuildOverviews(
                 continue;
             }
             MBTilesDataset* poODS = m_papoOverviewDS[iOvr];
-            if( poODS->m_nZoomLevel < nMinZoom )
-                nMinZoom = poODS->m_nZoomLevel;
             papapoOverviewBands[iBand][iCurOverview] = poODS->GetRasterBand(iBand+1);
             iCurOverview++ ;
         }

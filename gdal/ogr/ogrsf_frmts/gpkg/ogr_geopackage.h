@@ -32,8 +32,8 @@
 
 #include "ogrsf_frmts.h"
 #include "ogr_sqlite.h"
-#include "ogrgeopackageutility.h"
 #include "gpkgmbtilescommon.h"
+#include "ogrsqliteutility.h"
 
 #include <vector>
 
@@ -50,12 +50,12 @@ typedef enum
 } GPKGASpatialVariant;
 
 // Requirement 2
-static const int GP10_APPLICATION_ID = 0x47503130;
-static const int GP11_APPLICATION_ID = 0x47503131;
-static const int GPKG_APPLICATION_ID = 0x47504B47;
-static const GUInt32 GPKG_1_2_VERSION = 0x000027D8; // 10200
+static const GUInt32 GP10_APPLICATION_ID = 0x47503130U;
+static const GUInt32 GP11_APPLICATION_ID = 0x47503131U;
+static const GUInt32 GPKG_APPLICATION_ID = 0x47504B47U;
+static const GUInt32 GPKG_1_2_VERSION = 0x000027D8U; // 10200
 
-static const size_t knGpkgIdPos = 68;
+static const size_t knApplicationIdPos = 68;
 static const size_t knUserVersionPos = 60;
 
 /************************************************************************/
@@ -69,8 +69,8 @@ class GDALGeoPackageDataset CPL_FINAL : public OGRSQLiteBaseDataSource, public G
     friend class GDALGeoPackageRasterBand;
     friend class OGRGeoPackageTableLayer;
 
-    int                 m_nApplicationId;
-    int                 m_nUserVersion;
+    GUInt32             m_nApplicationId;
+    GUInt32             m_nUserVersion;
     OGRGeoPackageTableLayer** m_papoLayers;
     int                 m_nLayers;
     bool                m_bUtf8;
@@ -78,6 +78,8 @@ class GDALGeoPackageDataset CPL_FINAL : public OGRSQLiteBaseDataSource, public G
 #ifdef ENABLE_GPKG_OGR_CONTENTS
     bool                m_bHasGPKGOGRContents;
 #endif
+    bool                m_bHasGPKGGeometryColumns;
+    bool                m_bHasDefinition12_063;
 
     CPLString           m_osIdentifier;
     bool                m_bIdentifierAsCO;
@@ -99,6 +101,8 @@ class GDALGeoPackageDataset CPL_FINAL : public OGRSQLiteBaseDataSource, public G
     bool                m_bZoomOther;
 
     bool                m_bInFlushCache;
+
+    bool                m_bTableCreated;
 
     CPLString           m_osTilingScheme;
 
@@ -164,6 +168,9 @@ class GDALGeoPackageDataset CPL_FINAL : public OGRSQLiteBaseDataSource, public G
 
         bool                    CreateTileGriddedTable(char** papszOptions);
 
+        void                    CreateOGREmptyTableIfNeeded();
+        void                    RemoveOGREmptyTable();
+
     public:
                             GDALGeoPackageDataset();
                             virtual ~GDALGeoPackageDataset();
@@ -216,8 +223,8 @@ class GDALGeoPackageDataset CPL_FINAL : public OGRSQLiteBaseDataSource, public G
 
         bool                IsInTransaction() const;
 
-        int                 GetSrsId( const OGRSpatialReference * poSRS );
-        const char*         GetSrsName( const OGRSpatialReference * poSRS );
+        int                 GetSrsId( const OGRSpatialReference& oSRS );
+        const char*         GetSrsName( const OGRSpatialReference& oSRS );
         OGRSpatialReference* GetSpatialRef( int iSrsId );
         bool                GetUTF8() { return m_bUtf8; }
         OGRErr              CreateExtensionsTableIfNecessary();
@@ -229,6 +236,8 @@ class GDALGeoPackageDataset CPL_FINAL : public OGRSQLiteBaseDataSource, public G
         const char*         GetGeometryTypeString(OGRwkbGeometryType eType);
 
         void                ResetReadingAllLayers();
+        OGRErr              UpdateGpkgContentsLastChange(
+                                                const char* pszTableName);
 
         static GDALDataset* CreateCopy( const char *pszFilename,
                                                    GDALDataset *poSrcDS,
@@ -334,6 +343,7 @@ class OGRGeoPackageLayer : public OGRLayer, public IOGRSQLiteGetSpatialWhere
 class OGRGeoPackageTableLayer CPL_FINAL : public OGRGeoPackageLayer
 {
     char*                       m_pszTableName;
+    bool                        m_bIsTable;
     int                         m_iSrs;
     OGREnvelope*                m_poExtent;
 #ifdef ENABLE_GPKG_OGR_CONTENTS
@@ -345,6 +355,8 @@ class OGRGeoPackageTableLayer CPL_FINAL : public OGRGeoPackageLayer
     CPLString                   m_soColumns;
     CPLString                   m_soFilter;
     CPLString                   osQuery;
+    CPLString                   m_osRTreeName;
+    CPLString                   m_osFIDForRTree;
     bool                        m_bExtentChanged;
     bool                        m_bContentChanged;
     sqlite3_stmt*               m_poUpdateStatement;
@@ -375,7 +387,6 @@ class OGRGeoPackageTableLayer CPL_FINAL : public OGRGeoPackageLayer
     CPLString           BuildSelectFieldList(const std::vector<OGRFieldDefn*>& apoFields);
     OGRErr              RecreateTable(const CPLString& osColumnsForCreate,
                                       const CPLString& osFieldListForSelect);
-    bool                IsTable();
 #ifdef ENABLE_GPKG_OGR_CONTENTS
     void                CreateTriggers(const char* pszTableName = NULL);
     void                DisableTriggers(bool bNullifyFeatureCount = true);
@@ -416,6 +427,7 @@ class OGRGeoPackageTableLayer CPL_FINAL : public OGRGeoPackageLayer
     virtual OGRErr      GetExtent(int iGeomField, OGREnvelope *psExtent, int bForce) override
                 { return OGRGeoPackageLayer::GetExtent(iGeomField, psExtent, bForce); }
 
+    void                PostInit();
     void                RecomputeExtent();
 
     OGRErr              ReadTableDefinition(bool bIsSpatial, bool bIsGpkgTable);
@@ -476,18 +488,20 @@ class OGRGeoPackageTableLayer CPL_FINAL : public OGRGeoPackageLayer
     /* GPKG methods */
 
   private:
+    bool                CheckUpdatableTable(const char* pszOperation);
     OGRErr              UpdateExtent( const OGREnvelope *poExtent );
     OGRErr              SaveExtent();
     OGRErr              SaveTimestamp();
     OGRErr              BuildColumns();
     bool                IsGeomFieldSet( OGRFeature *poFeature );
     CPLString           FeatureGenerateUpdateSQL( OGRFeature *poFeature );
-    CPLString           FeatureGenerateInsertSQL( OGRFeature *poFeature, bool bAddFID );
+    CPLString           FeatureGenerateInsertSQL( OGRFeature *poFeature, bool bAddFID, bool bBindUnsetFields );
     OGRErr              FeatureBindUpdateParameters( OGRFeature *poFeature, sqlite3_stmt *poStmt );
-    OGRErr              FeatureBindInsertParameters( OGRFeature *poFeature, sqlite3_stmt *poStmt, bool bAddFID );
-    OGRErr              FeatureBindParameters( OGRFeature *poFeature, sqlite3_stmt *poStmt, int *pnColCount, bool bAddFID );
+    OGRErr              FeatureBindInsertParameters( OGRFeature *poFeature, sqlite3_stmt *poStmt, bool bAddFID, bool bBindUnsetFields );
+    OGRErr              FeatureBindParameters( OGRFeature *poFeature, sqlite3_stmt *poStmt, int *pnColCount, bool bAddFID, bool bBindUnsetFields );
 
     void                CheckUnknownExtensions();
+    bool                CreateGeometryExtensionIfNecessary(const OGRGeometry* poGeom);
     bool                CreateGeometryExtensionIfNecessary(OGRwkbGeometryType eGType);
 };
 
