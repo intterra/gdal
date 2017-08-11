@@ -555,11 +555,11 @@ OCI_INCLUDE =	-I$(ORACLE_HOME)\oci\include
 #          $(SDE_SDK)\lib\sde$(SDE_VERSION).lib $(SDE_SDK)\lib\sg$(SDE_VERSION).lib      
 
 
-#FGDB_ENABLED = YES
+FGDB_ENABLED = YES
 #FGDB_PLUGIN = YES
-#FGDB_SDK = C:\Users\rburhum\Desktop\FileGDB_API_VS2008_1_0beta3
-#FGDB_INC = $(FGDB_SDK)\include 
-#FGDB_LIB = $(FGDB_SDK)\lib\FileGDBAPI.lib
+FGDB_SDK = C:\Users\Dan\Downloads\filegdb_api_vs2012_1_3
+FGDB_INC = $(FGDB_SDK)\include 
+FGDB_LIB = $(FGDB_SDK)\lib\FileGDBAPI.lib
 
 #uncomment to build AmigoCloud as a plugin instead
 #AMIGOCLOUD_PLUGIN = YES
